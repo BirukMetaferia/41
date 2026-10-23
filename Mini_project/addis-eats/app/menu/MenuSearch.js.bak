@@ -1,0 +1,129 @@
+﻿"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import useSWR from "swr";
+import { fetcher } from "../../lib/fetcher";
+
+export default function MenuSearch() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const urlPage = Math.max(1, Number(searchParams.get("page")) || 1);
+  const urlQuery = searchParams.get("q") || "";
+
+  const [search, setSearch] = useState(urlQuery);
+  const [debouncedSearch, setDebouncedSearch] = useState(urlQuery);
+  const previousDebouncedSearch = useRef(urlQuery);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    if (previousDebouncedSearch.current === debouncedSearch) {
+      return;
+    }
+
+    previousDebouncedSearch.current = debouncedSearch;
+
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (debouncedSearch) {
+      params.set("q", debouncedSearch);
+    } else {
+      params.delete("q");
+    }
+
+    params.delete("page");
+
+    const queryString = params.toString();
+    const nextUrl = queryString ? `${pathname}?${queryString}` : pathname;
+
+    router.replace(nextUrl, { scroll: false });
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
+
+  const key = debouncedSearch
+    ? `/api/menu?q=${encodeURIComponent(debouncedSearch)}&page=${urlPage}`
+    : null;
+
+  const { data, error, isLoading, isValidating } = useSWR(key, fetcher, {
+    keepPreviousData: true,
+  });
+
+  function goToPage(nextPage) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", String(nextPage));
+
+    if (debouncedSearch) {
+      params.set("q", debouncedSearch);
+    } else {
+      params.delete("q");
+    }
+
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  return (
+    <section>
+      <h1>Search the Menu</h1>
+
+      <input
+        type="search"
+        placeholder="Search dishes..."
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+
+      {isLoading && !data && <p>Loading dishes...</p>}
+      {isValidating && data && <p>Updating results...</p>}
+
+      {error && (
+        <p role="alert">Could not load dishes: {error.message}</p>
+      )}
+
+      {data?.dishes?.length === 0 && !isValidating && (
+        <p>No dishes found.</p>
+      )}
+
+      {data?.dishes?.length > 0 && (
+        <ul>
+          {data.dishes.map((dish) => (
+            <li key={dish.id}>
+              {dish.name} - {dish.price} ETB
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {data && data.totalPages > 1 && (
+        <nav aria-label="Menu pagination">
+          <button
+            type="button"
+            onClick={() => goToPage(urlPage - 1)}
+            disabled={urlPage <= 1}
+          >
+            Previous
+          </button>
+
+          <span> Page {data.page} of {data.totalPages} </span>
+
+          <button
+            type="button"
+            onClick={() => goToPage(urlPage + 1)}
+            disabled={urlPage >= data.totalPages}
+          >
+            Next
+          </button>
+        </nav>
+      )}
+    </section>
+  );
+}
